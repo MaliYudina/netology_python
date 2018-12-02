@@ -15,7 +15,7 @@ def find_string(path, string):
             'Error while trying to read {}'.format(
                 err))
     except UnicodeDecodeError:
-        pass  # Damn unicode
+        pass
     return ''
 
 
@@ -23,10 +23,11 @@ def find_in_files(string, files, basedir):
     assert isinstance(files, (list, tuple)), 'we only accept lists or tuples'
 
     matched = []
-    for file_path in files:
-        file_path = os.path.join(basedir, file_path)
+    for file_name in files:
+        file_path = os.path.join(basedir, file_name)
         if find_string(file_path, string):
-            matched.append(file_path)
+            matched.append(file_name)
+
     return matched
 
 
@@ -42,6 +43,3 @@ def main():
 
 
 main()
-#
-# if __name__ == '__main__':
-#     main()
