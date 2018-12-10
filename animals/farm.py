@@ -63,3 +63,19 @@ work_with_sheep(sheep_list)
 work_with_chicken(chicken_list)
 work_with_goat(goat_list)
 work_with_duck(duck_list)
+
+
+#добавляем для доработки ДЗ
+
+
+animals_list = [cow_list, sheep_list, goat_list, geese_list, chicken_list, duck_list]
+
+total_weight = 0
+weights = []
+for specie in animals_list:
+    for animal in specie:
+        weights.append(animal.weight)
+print(
+    'Самое тяжелое животное весит {}кг. Общий вес: {}кг.'.format(
+        max(weights),
+        sum(weights)))

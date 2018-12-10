@@ -1,4 +1,7 @@
-class Animal:
+from abc import ABC, abstractmethod
+
+
+class BaseAnimal(ABC):
     """
     abstract class for all animals
     """
@@ -7,16 +10,19 @@ class Animal:
         self.weight = mass
 
     def feed(self):
+        """ Implements feed """
         print('Yummy-yummy! {} is not hungry anymore'.format(self.name))
 
+    @abstractmethod
     def talk(self):
-        raise NotImplementedError
+        """ Implements sounds """
+        raise NotImplementedError()
 
     def _talk(self, sound):
         print('{} says {}'.format(self.name, sound))
 
 
-class DairyCattle(Animal):
+class DairyCattle(BaseAnimal):
     """
     Cattle that is able to produce milk
     """
@@ -24,7 +30,7 @@ class DairyCattle(Animal):
         print('{} was milked'.format(self.name))
 
 
-class Bird(Animal):
+class Bird(BaseAnimal):
     """
     class for birds only
     """
@@ -64,7 +70,7 @@ class Cow(DairyCattle):
         self._talk('moo-moo')
 
 
-class Sheep(Animal):
+class Sheep(BaseAnimal):
     """
     class implements sheep's specific functionality
     """
