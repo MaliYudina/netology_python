@@ -1,12 +1,16 @@
 try:
-    operator = input('Введите оператор: ')
-    if operator != '-' or '+' or '*' or '/':
+    polish = input('Введите аргументы в формате "*,47,5": ')
+
+    arguments_list = polish.split(',') #to divide multi-digit values
+    operator = arguments_list[0]
+    num1 = int(arguments_list[1])
+    num2 = int(arguments_list[2])
+    accept_operators = ('-', '+', '*', '/')
+    if operator not in accept_operators:
         operator = input('Введите оператор правильно: ')
-    num1 = int(input('Введите первое положительное число: '))
-    num2 = int(input('Введите второе положительное число: '))
 
     assert (num1 > 0), 'Необходимо ввести положительное число!'
-    assert (num2 >= 0), 'Необходимо ввести положительное число!'
+    assert (num2 > 0), 'Необходимо ввести положительное число!'
 
     if operator == '-':
         print('Ответ:', num1 - num2)
