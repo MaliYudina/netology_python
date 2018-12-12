@@ -1,5 +1,4 @@
 import requests
-from urllib.parse import urljoin
 from pprint import pprint
 
 APP_ID = 6776462
@@ -10,6 +9,7 @@ URL_START = str('https://vk.com/id')
 
 SOURCE_USER = 1895319
 TARGET_USER = 83175
+
 
 class ProfileIsPrivateException(RuntimeError):
     """ Thrown when profile is private """
@@ -67,7 +67,7 @@ class User():
 
 
     def __str__(self):
-        return urljoin(URL_START, str(self.user_id))
+        return URL_START + str(self.user_id)
 
 
 def main():
