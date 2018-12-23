@@ -1,123 +1,151 @@
 import requests
-import sys
-import time
 import json
 import logging
-from progressbar import ProgressBar
+from config import TOKEN, ID_INPUT
 
-TOKEN = 'ed1271af9e8883f7a7c2cefbfddfcbc61563029666c487b2f71a5227cce0d1b533c4af4c5b888633c06ae'
+# from progressbar import ProgressBar
+
+
 VERSION = '5.92'
+URL_USER = 'https://api.vk.com/method/users.get'
 URL_FRIENDS = 'https://api.vk.com/method/friends.get'
 URL_GROUPS = 'https://api.vk.com/method/groups.get'
 URL_MEMBERS = 'https://api.vk.com/method/groups.getMembers'
 URL_GROUP_ID = 'https://api.vk.com/method/groups.getById'
 ERROR_MANY_REQ = 6
+USER_ID = ID_INPUT
 
 print('\nStep 1 is being started...\n')
 progress = []
 
 
-def progress_bar(fn):
-    try:
-        '' % fn()
-    except:
-        fn
+class TooManyRequestsError:
+    """
+    class for error with many requests
+    """
 
-    def wrapped():
-        try:
-            sys.stdout.write('')
-            fn()
-            sys.stdout.write('')
-        except KeyboardInterrupt:
-            sys.stdout.write('')
-
-    progress.append(wrapped)
-    return wrapped
+    def __init__(self, name):
+        self.name = name
 
 
-@progress_bar
-def current_bar():
-    pbar = ProgressBar(maxval=50)
-    for i in pbar((i for i in range(50))):
-        time.sleep(0.01)
-
+# def progress_bar(fn):
+#     try:
+#         '' % fn()
+#     except:
+#         fn
+#
+#     def wrapped():
+#         try:
+#             sys.stdout.write('')
+#             fn()
+#             sys.stdout.write('')
+#         except KeyboardInterrupt:
+#             sys.stdout.write('')
+#
+#     progress.append(wrapped)
+#     return wrapped
+#
+#
+# def current_bar():
+#     pbar = ProgressBar(maxval=50)
+#     for i in pbar((i for i in range(50))):
+#         time.sleep(0.01)
 
 def params_vk(url, id):
     params = {'access_token': TOKEN, 'v': VERSION, 'fields': 'screen_name'}
     if url == URL_FRIENDS:
         params['user_id'] = id
         if not str(id).isdigit():
-            params['screen_name'] = id
+            params['nickname'] = id  # TODO: check why not ok
+            print(id)
     else:
         params['group_id'] = id
 
     if (url == URL_GROUPS) or (url == URL_GROUP_ID):
         params['fields'] = 'members_count'
-        try:
-            for bar in progress: bar()
-        except KeyboardInterrupt:
-            sys.stdout('')
+        # try:
+        #     for bar in progress: bar()
+        # except KeyboardInterrupt:
+        #     sys.stdout('')
     return params
 
 
-def error_check(fn):
+def errors_logged(fn):
     def wrapped(*args, **kwargs):
         try:
             return fn(*args, **kwargs)
         except Exception as err:
             logging.error('{}(*{}, **{}) failed {}'.format(
                 function.__name__, repr(args), repr(kwargs), repr(err)))
-
+            raise
     return wrapped
 
 
-@error_check
-def req_error(url, id):
+@errors_logged
+def do_request(url, id):
     while True:
         message = requests.get(url, params_vk(url, id)).json()
         if 'error' in message.keys():
             if message['error']['error_code'] != ERROR_MANY_REQ:
-                print('An unexpected error occurred: ', message['error']['error_msg'])
-                break
+                raise Exception('Retry error')  # Class instance, not class itself
         else:
-            break
-    return message
+            return message
 
 
-def find_secret():
-    friends_list = req_error(URL_FRIENDS, user_id)['response']['items']
-    group_names_list = req_error(URL_GROUPS, user_id)['response']['items']
+def find_secret(user_id):
+    """
+    search all friends list,
+    determine the groups list
+    and check if friends are in this groups
+    """
+    # Get target user friends list
+    friends_list_raw = do_request(URL_FRIENDS, user_id)['response']['items']
+    # Get target user groups list
+    group_names_list = do_request(URL_GROUPS, user_id)['response']['items']
     groups_list_qty = len(group_names_list)
 
-    secret_result_list = []
-    num = 0
+    friends = set()
+    for friend in friends_list_raw:
+        friends.add(friend['id'])
 
-    for i, group_id in enumerate(group_names_list):
-        print('Checking {} of {}'.format(num, groups_list_qty))
-        current_bar()
-        num += 1
-        friends_common_list = req_error(URL_MEMBERS, group_id)['response']['items']
-        secret_group_flag = True
-        for friend in friends_list:
-            if friend in friends_common_list:
-                secret_group_flag = False
-                break
-        if secret_group_flag:
-            secret_result_list.append(group_id)
+    secret_groups = []
+    for num, group_id in enumerate(group_names_list):
+        print('Checking {} of {}'.format(num + 1, groups_list_qty))
+        # current_bar()
+        group_members_raw = do_request(URL_MEMBERS, group_id)['response']['items']
+        members = set()
+        for member in group_members_raw:
+            members.add(member['id'])
 
-    print('\nStep 1 is successfully finished.\n\nStep 2 is being started...\n')
+        print('Friends that are also in this group:', friends & members)
+
+        # Кажется, это должно работать, но не работает
+        if not (friends & members):
+            secret_groups.append(group_id)
+
+        print(secret_groups)
+
+    # Writing result
+    filename = 'groups_answer.json'
+    with open(filename, 'w', encoding='utf-8') as f:
+        f.write(json.dumps(secret_groups, sort_keys=False))
+
+    print('\nStep 1 is finished.\n\nStarting step 2...\n')
 
     group_names_list = []
-    secret_group_list_qty = len(secret_result_list)
-    num = 0
-    for num, secret_group in enumerate(secret_result_list):
+    num = 1
+    secret_group_list_qty = len(secret_groups)
+    for num, secret_group in enumerate(secret_groups, num):
         print('Checking {} of {}'.format(num, secret_group_list_qty))
+        # current_bar()
         num += 1
-        group_dict = {}
-        group = req_error(URL_GROUP_ID, secret_group)['response'][0]
-        group_dict['name'] = group['name']
-        group_dict['gid'] = group['id']
-        group_dict['members_count'] = group['members_count']
+
+        group = do_request(URL_GROUP_ID, secret_group)['response'][0]
+        group_dict = {
+            'name': group['name'],
+            'gid': group['id'],
+            'members_count': group['members_count'],
+        }
         group_names_list.append(group_dict)
 
     filename = 'groups_answer.json'
@@ -125,9 +153,8 @@ def find_secret():
         f.write(json.dumps(group_names_list, sort_keys=False,
                            indent=4, ensure_ascii=False, separators=(',', ': ')))
     print('Search results are written down - ', filename)
-    print('Total were found', groups_list_qty, 'groups.')
+    print('Total were found', groups_list_qty, 'groups')
 
 
 if __name__ == '__main__':
-    user_id = 171691064
-    find_secret()
+    find_secret(USER_ID)
