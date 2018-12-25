@@ -1,16 +1,21 @@
 import requests
 import json
 import logging
+import time
 from config import TOKEN, ID_INPUT
 
-# from progressbar import ProgressBar
+
+from progressbar import ProgressBar
 
 
 VERSION = '5.92'
 URL_USER = 'https://api.vk.com/method/users.get'
 URL_FRIENDS = 'https://api.vk.com/method/friends.get'
+
+# Возвращает список сообществ указанного пользователя.
 URL_GROUPS = 'https://api.vk.com/method/groups.get'
-URL_MEMBERS = 'https://api.vk.com/method/groups.getMembers'
+
+URL_ARE_MEMBERS = 'https://api.vk.com/method/groups.isMember'
 URL_GROUP_ID = 'https://api.vk.com/method/groups.getById'
 ERROR_MANY_REQ = 6
 USER_ID = ID_INPUT
@@ -19,7 +24,7 @@ print('\nStep 1 is being started...\n')
 progress = []
 
 
-class TooManyRequestsError:
+class TooManyRequestsError(Exception):
     """
     class for error with many requests
     """
@@ -28,46 +33,20 @@ class TooManyRequestsError:
         self.name = name
 
 
-# def progress_bar(fn):
-#     try:
-#         '' % fn()
-#     except:
-#         fn
-#
-#     def wrapped():
-#         try:
-#             sys.stdout.write('')
-#             fn()
-#             sys.stdout.write('')
-#         except KeyboardInterrupt:
-#             sys.stdout.write('')
-#
-#     progress.append(wrapped)
-#     return wrapped
-#
-#
-# def current_bar():
-#     pbar = ProgressBar(maxval=50)
-#     for i in pbar((i for i in range(50))):
-#         time.sleep(0.01)
-
-def params_vk(url, id):
-    params = {'access_token': TOKEN, 'v': VERSION, 'fields': 'screen_name'}
-    if url == URL_FRIENDS:
-        params['user_id'] = id
-        if not str(id).isdigit():
-            params['nickname'] = id  # TODO: check why not ok
-            print(id)
-    else:
-        params['group_id'] = id
-
-    if (url == URL_GROUPS) or (url == URL_GROUP_ID):
-        params['fields'] = 'members_count'
-        # try:
-        #     for bar in progress: bar()
-        # except KeyboardInterrupt:
-        #     sys.stdout('')
+def params_vk(**kwargs):
+    params = {
+        'access_token': TOKEN,
+        'v': VERSION,
+        'fields': 'screen_name',
+        **kwargs,
+    }
     return params
+
+
+def resolve_uid(user_id):
+    if user_id.isnumeric():
+        return user_id
+    return do_request(URL_USER, nickname=user_id)[0]['id']
 
 
 def errors_logged(fn):
@@ -76,54 +55,82 @@ def errors_logged(fn):
             return fn(*args, **kwargs)
         except Exception as err:
             logging.error('{}(*{}, **{}) failed {}'.format(
-                function.__name__, repr(args), repr(kwargs), repr(err)))
+                fn.__name__, repr(args), repr(kwargs), repr(err)))
             raise
     return wrapped
 
 
 @errors_logged
-def do_request(url, id):
+def do_request(url, **kwargs):
     while True:
-        message = requests.get(url, params_vk(url, id)).json()
+        message = requests.get(url, params_vk(**kwargs)).json()
         if 'error' in message.keys():
-            if message['error']['error_code'] != ERROR_MANY_REQ:
-                raise Exception('Retry error')  # Class instance, not class itself
+            logging.error('API error: %s', message['error'])
+            if message['error']['error_code'] == ERROR_MANY_REQ:
+                raise TooManyRequestsError('Cannot retry anymore')
+            time.sleep(1)
         else:
-            return message
+            return message['response']
 
 
-def find_secret(user_id):
+def group_is_private(membership_obj_list):
     """
-    search all friends list,
-    determine the groups list
-    and check if friends are in this groups
+    iterating through the given list, look for '1':
+      return False if found,
+        and return True otherwise
     """
+    # E.g.: [{'member': 0, 'user_id': 1646659}, {'member': 0, 'user_id': 214895},  ... ]
+    for member in membership_obj_list:
+        if member['member']:
+            return False
+    return True
+
+
+def find_secret(identifier):
+    """
+    find source user's groups
+    find his friends
+    check if each friend is a member of the above mentioned groups
+    for each group given:
+      call groups.isMember using friends' UIDs
+      get 1/0 response
+      call group_is_private function with the above response as a single parameter:
+        iterating through the given list, look for '1':
+          return False if found,
+        and return True otherwise
+
+    """
+    user_id = resolve_uid(identifier)
+
     # Get target user friends list
-    friends_list_raw = do_request(URL_FRIENDS, user_id)['response']['items']
+    friends_obj_list = do_request(URL_FRIENDS, user_id=user_id)['items']
     # Get target user groups list
-    group_names_list = do_request(URL_GROUPS, user_id)['response']['items']
-    groups_list_qty = len(group_names_list)
+    group_obj_list = do_request(
+        URL_GROUPS,
+        user_id=user_id,
+        fields='members_count',
+    )['items']
 
     friends = set()
-    for friend in friends_list_raw:
-        friends.add(friend['id'])
+    for friend in friends_obj_list:
+        friends.add(str(friend['id']))
 
     secret_groups = []
-    for num, group_id in enumerate(group_names_list):
-        print('Checking {} of {}'.format(num + 1, groups_list_qty))
-        # current_bar()
-        group_members_raw = do_request(URL_MEMBERS, group_id)['response']['items']
-        members = set()
-        for member in group_members_raw:
-            members.add(member['id'])
-
-        print('Friends that are also in this group:', friends & members)
-
-        # Кажется, это должно работать, но не работает
-        if not (friends & members):
+    prog = ProgressBar(maxval=len(group_obj_list), poll=0, left_justify=False).start()
+    for num, group_id in enumerate(group_obj_list):
+        prog.update(num + 1)
+        # print('Checking {}'.format(num + 1))
+        membership_obj_list = do_request(
+            URL_ARE_MEMBERS,
+            group_id=group_id,
+            user_ids=','.join(friends)
+        )
+        if group_is_private(membership_obj_list):
             secret_groups.append(group_id)
+        time.sleep(0.5)
 
-        print(secret_groups)
+        # print(secret_groups)
+    prog.finish()
 
     # Writing result
     filename = 'groups_answer.json'
@@ -132,28 +139,32 @@ def find_secret(user_id):
 
     print('\nStep 1 is finished.\n\nStarting step 2...\n')
 
-    group_names_list = []
-    num = 1
-    secret_group_list_qty = len(secret_groups)
-    for num, secret_group in enumerate(secret_groups, num):
-        print('Checking {} of {}'.format(num, secret_group_list_qty))
-        # current_bar()
-        num += 1
-
-        group = do_request(URL_GROUP_ID, secret_group)['response'][0]
+    group_obj_list = []
+    prog = ProgressBar(maxval=len(secret_groups), poll=0, left_justify=False).start()
+    for num, secret_group in enumerate(secret_groups):
+        # print('Checking {} of {}'.format(num + 1, len(secret_groups)))
+        prog.update(num + 1)
+        group = do_request(
+            URL_GROUP_ID,
+            group_id=secret_group,
+            fields='members_count',
+        )[0]
         group_dict = {
             'name': group['name'],
             'gid': group['id'],
             'members_count': group['members_count'],
         }
-        group_names_list.append(group_dict)
+        group_obj_list.append(group_dict)
+        time.sleep(0.5)
+    prog.finish()
 
     filename = 'groups_answer.json'
     with open(filename, 'w', encoding='utf-8') as f:
-        f.write(json.dumps(group_names_list, sort_keys=False,
+        f.write(json.dumps(group_obj_list, sort_keys=False,
                            indent=4, ensure_ascii=False, separators=(',', ': ')))
+
     print('Search results are written down - ', filename)
-    print('Total were found', groups_list_qty, 'groups')
+    print('Total were found', len(secret_groups), 'groups')
 
 
 if __name__ == '__main__':
